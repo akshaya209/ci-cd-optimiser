@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GreenOps | CI/CD Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <div class="logo-icon">🌿</div>
+                <div class="logo-text">GreenOps</div>
+            </div>
+            
+            <nav class="main-nav">
+                <div class="nav-item active">
+                    <span class="icon">📊</span> Analytics
+                </div>
+                <div class="nav-item">
+                    <span class="icon">🕸️</span> Graph
+                </div>
+                <div class="nav-item">
+                    <span class="icon">🛡️</span> Security
+                </div>
+            </nav>
+
+            <div class="metrics-panel">
+                <div class="section-title">CARBON IMPACT</div>
+                <div class="metric-card carbon-card">
+                    <div class="metric-value" id="carbon-val">--</div>
+                    <div class="metric-unit">gCO2/kWh</div>
+                    <div class="status-badge" id="carbon-status">OPTIMIZED</div>
+                </div>
+
+                <div class="section-title">SAVINGS ANALYSIS</div>
+                <div class="metric-card savings-card">
+                    <div class="metric-value" id="savings-val">--</div>
+                    <div class="metric-unit">pruned out of <span id="total-tests-val">--</span></div>
+                    <div id="savings-pct" class="status-badge" style="background: rgba(88, 166, 255, 0.1); color: var(--accent-blue-bright); border-color: rgba(88, 166, 255, 0.2);">--%</div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="run-sim-btn" class="primary-btn">Compute Impact</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="breadcrumb">Pipeline / <span id="repo-name">ci-cd-optimiser</span></div>
+                <div class="pr-info">PR #<span id="pr-number">--</span></div>
+            </header>
+
+            <section class="dashboard-grid">
+                <!-- Graph Section -->
+                <div class="card graph-card">
+                    <div class="card-header">
+                        <div class="card-title">Dependency Graph</div>
+                        <div class="card-actions">
+                            <button class="icon-btn" id="reset-graph" title="Reset view">🔄</button>
+                        </div>
+                    </div>
+                    <div id="cy" class="graph-container"></div>
+                    
+                    <!-- Node Details Overlay -->
+                    <div id="node-details" class="node-details">
+                        <div class="card-title" id="detail-node-name" style="margin-bottom: 12px; font-size: 14px;">Node Details</div>
+                        <div class="detail-row">
+                            <span class="detail-label">Type</span>
+                            <span class="detail-value" id="detail-node-type">--</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Sim Score</span>
+                            <span class="detail-value" id="detail-sim-score">--</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Pf Score</span>
+                            <span class="detail-value" id="detail-pf-score">--</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Status</span>
+                            <span class="detail-value" id="detail-status">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Insights Sidebar -->
+                <div class="insights-container">
+                    <div class="card insight-card">
+                        <div class="card-title">Analysis Insights</div>
+                        <div class="insight-list" id="insight-list">
+                            <div class="placeholder-text">Run analysis to see insights...</div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Detailed Analytics</div>
+                        </div>
+                        <div id="module-list" class="module-list">
+                            <div class="placeholder-text">Waiting for data...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Notification system -->
+    <div id="notification-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

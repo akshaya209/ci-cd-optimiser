@@ -300,6 +300,19 @@ class TestSelectionEngine:
         if self._historical_rates is None:
             self._historical_rates = load_historical_failure_rates(self.greenops_output)
 
+    def _discover_test_files(self) -> List[str]:
+        """
+        Recursively find test files under repo_root.
+        Includes: test_*.py, *_test.py, *.spec.js, *.test.js
+        Returns list of file paths as strings.
+        """
+        patterns = ("test_*.py", "*_test.py", "*.spec.js", "*.test.js")
+        found = []
+        root = Path(self.repo_root)
+        for pattern in patterns:
+            found.extend(str(p) for p in root.rglob(pattern))
+        return found
+
     def select_tests(
         self,
         diff_text:         str,
@@ -356,8 +369,67 @@ class TestSelectionEngine:
         log.info("Total test candidates: %d", len(candidate_test_paths))
 
         if not candidate_test_paths:
-            log.info("No test candidates found — selecting all tests (safety)")
-            return self._all_tests_result(pr_number, carbon_intensity, "no_candidates_found")
+            log.info("No graph candidates — using all tests with embedding-only pruning")
+            all_tests = self._dep_engine.test_files or self._discover_test_files()
+            if not all_tests:
+                return self._all_tests_result(pr_number, carbon_intensity, "no_tests_found")
+            final_tests = []
+            pruned_tests = []
+            explanations = []
+            for t in all_tests:
+                t_stem = Path(t).stem.replace("test_", "").replace("_test", "")
+                related = any(
+                    t_stem in Path(m).stem or Path(m).stem in t_stem
+                    for m in changed_modules
+                )
+                if related:
+                    final_tests.append(t)
+                    explanations.append({
+                        "test": t,
+                        "decision": "RUN",
+                        "reason": "STEM_MATCH_WITH_CHANGED_MODULE",
+                        "pf_score": 0.0,
+                        "sim_score": 0.0,
+                        "impact_score": 0.0,
+                        "in_dep_graph": False,
+                        "hash_changed": False,
+                        "triggered_by": changed_modules[:3],
+                    })
+                else:
+                    pruned_tests.append(t)
+                    explanations.append({
+                        "test": t,
+                        "decision": "PRUNE",
+                        "reason": "NO_RELATION_TO_CHANGED_MODULE",
+                        "pf_score": 0.0,
+                        "sim_score": 0.0,
+                        "impact_score": 0.0,
+                        "in_dep_graph": False,
+                        "hash_changed": False,
+                        "triggered_by": [],
+                    })
+            total = len(all_tests)
+            pruning_rate = round(len(pruned_tests) / max(total, 1), 4)
+            return {
+                "changed_modules": changed_modules,
+                "similarity_scores": similarity_scores,
+                "hash_deltas": hash_deltas,
+                "impacted_modules": changed_modules,
+                "final_tests": sorted(final_tests),
+                "pruned_tests": sorted(pruned_tests),
+                "explanations": explanations,
+                "summary": {
+                    "total_tests_discovered": total,
+                    "tests_selected": len(final_tests),
+                    "tests_pruned": len(pruned_tests),
+                    "pruning_rate": pruning_rate,
+                    "carbon_intensity": carbon_intensity,
+                    "carbon_threshold_exceeded": carbon_intensity > CARBON_THRESHOLD,
+                    "total_lines_changed": total_lines,
+                    "num_changed_modules": len(changed_modules),
+                    "selection_strategy": "fallback_embedding_pruning",
+                }
+            }
 
         # Step 3: Build TestCandidate objects for each candidate
         candidates: Dict[str, TestCandidate] = {}

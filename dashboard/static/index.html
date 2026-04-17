@@ -1,122 +1,298 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenOps | CI/CD Optimizer</title>
-    <link rel="stylesheet" href="/static/styles.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GreenOps · Carbon-Aware CI/CD</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
 </head>
 <body class="dark-theme">
-    <div class="app-container">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="logo-container">
-                <div class="logo-icon">🌿</div>
-                <div class="logo-text">GreenOps</div>
-            </div>
-            
-            <nav class="main-nav">
-                <div class="nav-item active">
-                    <span class="icon">📊</span> Analytics
-                </div>
-                <div class="nav-item">
-                    <span class="icon">🕸️</span> Graph
-                </div>
-                <div class="nav-item">
-                    <span class="icon">🛡️</span> Security
-                </div>
-            </nav>
+<div class="app-container">
 
-            <div class="metrics-panel">
-                <div class="section-title">CARBON IMPACT</div>
-                <div class="metric-card carbon-card">
-                    <div class="metric-value" id="carbon-val">--</div>
-                    <div class="metric-unit">gCO2/kWh</div>
-                    <div class="status-badge" id="carbon-status">OPTIMIZED</div>
-                </div>
-
-                <div class="section-title">SAVINGS ANALYSIS</div>
-                <div class="metric-card savings-card">
-                    <div class="metric-value" id="savings-val">--</div>
-                    <div class="metric-unit">pruned out of <span id="total-tests-val">--</span></div>
-                    <div id="savings-pct" class="status-badge" style="background: rgba(88, 166, 255, 0.1); color: var(--accent-blue-bright); border-color: rgba(88, 166, 255, 0.2);">--%</div>
-                </div>
-            </div>
-
-            <div class="controls">
-                <button id="run-sim-btn" class="primary-btn">Compute Impact</button>
-            </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <header class="top-bar">
-                <div class="breadcrumb">Pipeline / <span id="repo-name">ci-cd-optimiser</span></div>
-                <div class="pr-info">PR #<span id="pr-number">--</span></div>
-            </header>
-
-            <section class="dashboard-grid">
-                <!-- Graph Section -->
-                <div class="card graph-card">
-                    <div class="card-header">
-                        <div class="card-title">Dependency Graph</div>
-                        <div class="card-actions">
-                            <button class="icon-btn" id="reset-graph" title="Reset view">🔄</button>
-                        </div>
-                    </div>
-                    <div id="cy" class="graph-container"></div>
-                    
-                    <!-- Node Details Overlay -->
-                    <div id="node-details" class="node-details">
-                        <div class="card-title" id="detail-node-name" style="margin-bottom: 12px; font-size: 14px;">Node Details</div>
-                        <div class="detail-row">
-                            <span class="detail-label">Type</span>
-                            <span class="detail-value" id="detail-node-type">--</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Sim Score</span>
-                            <span class="detail-value" id="detail-sim-score">--</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Pf Score</span>
-                            <span class="detail-value" id="detail-pf-score">--</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Status</span>
-                            <span class="detail-value" id="detail-status">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Insights Sidebar -->
-                <div class="insights-container">
-                    <div class="card insight-card">
-                        <div class="card-title">Analysis Insights</div>
-                        <div class="insight-list" id="insight-list">
-                            <div class="placeholder-text">Run analysis to see insights...</div>
-                        </div>
-                    </div>
-                    
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-title">Detailed Analytics</div>
-                        </div>
-                        <div id="module-list" class="module-list">
-                            <div class="placeholder-text">Waiting for data...</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
+  <!-- ═══ SIDEBAR ═══════════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <div class="logo-container">
+      <div class="logo-icon">🌿</div>
+      <div class="logo-text">GreenOps</div>
     </div>
 
-    <!-- Notification system -->
-    <div id="notification-container"></div>
+    <div class="tagline">Carbon-Aware CI/CD<br>Test Suite Reduction</div>
 
-    <script src="/static/app.js"></script>
+    <!-- Repo + PR input -->
+    <div class="input-group">
+      <label class="input-label">REPOSITORY</label>
+      <input id="repo-input" class="text-input" type="text"
+             placeholder="owner/repo" value="akshaya209/ci-cd-optimiser">
+    </div>
+    <div class="input-group">
+      <label class="input-label">PULL REQUEST #</label>
+      <input id="pr-input" class="text-input" type="number"
+             placeholder="42" value="1" min="0">
+    </div>
+
+    <button id="run-btn" class="primary-btn">
+      <span class="btn-icon">⚡</span>
+      <span class="btn-label">Run Analysis</span>
+    </button>
+
+    <!-- Carbon metric -->
+    <div class="metrics-panel">
+      <div class="section-title">CARBON INTENSITY</div>
+      <div class="metric-card carbon-card">
+        <div class="metric-row">
+          <div>
+            <div class="metric-value" id="carbon-val">--</div>
+            <div class="metric-unit">gCO₂/kWh</div>
+          </div>
+          <div id="carbon-badge" class="status-badge">--</div>
+        </div>
+        <div class="carbon-meta">
+          <span id="carbon-zone-label" class="zone-chip">--</span>
+          <span id="carbon-source-label" class="source-label">--</span>
+        </div>
+      </div>
+
+      <div class="section-title">TEST PRUNING</div>
+      <div class="metric-card savings-card">
+        <div class="metric-row">
+          <div>
+            <div class="metric-value" id="savings-val">--</div>
+            <div class="metric-unit">pruned of <span id="total-tests-val">--</span> total</div>
+          </div>
+          <div id="savings-pct" class="status-badge pct-badge">--%</div>
+        </div>
+        <div class="pruning-bar-wrap">
+          <div class="pruning-bar-bg">
+            <div class="pruning-bar-fill" id="pruning-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="breadcrumb-small">
+        <span id="repo-name">ci-cd-optimiser</span> · PR <span id="pr-number">--</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN CONTENT ══════════════════════════════════════════════════════ -->
+  <main class="main-content">
+
+    <header class="top-bar">
+      <div class="page-title">Pipeline Dashboard</div>
+      <div class="header-right">
+        <div id="pipeline-status-chip" class="pipeline-chip idle">● IDLE</div>
+        <button id="reset-graph" class="icon-btn" title="Fit graph">⊡</button>
+      </div>
+    </header>
+
+    <!-- Pipeline stepper -->
+    <div class="pipeline-stepper" id="pipeline-stepper">
+      <div class="step" data-step="input">
+        <div class="step-dot"></div><div class="step-label">Repo Input</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="dep_graph">
+        <div class="step-dot"></div><div class="step-label">Dep Graph</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="ast">
+        <div class="step-dot"></div><div class="step-label">AST Parse</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="embed">
+        <div class="step-dot"></div><div class="step-label">Embeddings</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="carbon">
+        <div class="step-dot"></div><div class="step-label">Carbon</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="selection">
+        <div class="step-dot"></div><div class="step-label">Test Select</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="pruning">
+        <div class="step-dot"></div><div class="step-label">Pruning</div>
+      </div>
+    </div>
+
+    <!-- Main grid -->
+    <div class="dashboard-grid">
+
+      <!-- Left column -->
+      <div class="left-col">
+
+        <!-- Dependency Graph -->
+        <div class="card graph-card">
+          <div class="card-header">
+            <div class="card-title">🕸 Dependency Graph</div>
+            <div class="card-meta" id="graph-meta"></div>
+          </div>
+          <div id="cy" class="graph-container"></div>
+          <div id="node-details" class="node-details">
+            <div class="nd-title" id="detail-node-name">Node Details</div>
+            <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value" id="detail-node-type">--</span></div>
+            <div class="detail-row"><span class="detail-label">Sim Score</span><span class="detail-value" id="detail-sim-score">--</span></div>
+            <div class="detail-row"><span class="detail-label">Pf Score</span><span class="detail-value" id="detail-pf-score">--</span></div>
+            <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" id="detail-status">--</span></div>
+          </div>
+        </div>
+
+        <!-- AST + Embeddings side by side -->
+        <div class="two-col-cards">
+
+          <!-- AST Card -->
+          <div class="card stage-card" id="ast-card">
+            <div class="card-header">
+              <div class="card-title">🔬 AST Parser</div>
+              <div id="ast-badge" class="stage-badge pending">PENDING</div>
+            </div>
+            <div class="stage-body">
+              <div class="stat-grid">
+                <div class="stat-item">
+                  <div class="stat-val" id="ast-files">--</div>
+                  <div class="stat-label">Files Parsed</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="ast-functions">--</div>
+                  <div class="stat-label">Functions</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="ast-classes">--</div>
+                  <div class="stat-label">Classes</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="ast-time">--</div>
+                  <div class="stat-label">ms</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Embeddings Card -->
+          <div class="card stage-card" id="embed-card">
+            <div class="card-header">
+              <div class="card-title">🧠 Embeddings</div>
+              <div id="embed-badge" class="stage-badge pending">PENDING</div>
+            </div>
+            <div class="stage-body">
+              <div class="stat-grid">
+                <div class="stat-item">
+                  <div class="stat-val" id="embed-modules">--</div>
+                  <div class="stat-label">Modules</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="embed-vectors">--</div>
+                  <div class="stat-label">Vectors</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="embed-cache">--</div>
+                  <div class="stat-label">Cache Hits</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-val" id="embed-time">--</div>
+                  <div class="stat-label">ms</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /two-col-cards -->
+
+      </div><!-- /left-col -->
+
+      <!-- Right column -->
+      <div class="right-col">
+
+        <!-- Carbon Detail Card -->
+        <div class="card carbon-detail-card" id="carbon-card">
+          <div class="card-header">
+            <div class="card-title">🌍 Carbon Intelligence</div>
+            <div id="carbon-stage-badge" class="stage-badge pending">PENDING</div>
+          </div>
+          <div class="carbon-body">
+            <div class="carbon-big">
+              <div class="carbon-big-val" id="carbon-detail-val">--</div>
+              <div class="carbon-big-unit">gCO₂/kWh</div>
+            </div>
+            <div class="carbon-details-grid">
+              <div class="cdet"><div class="cdet-label">ZONE</div><div class="cdet-val" id="carbon-zone">--</div></div>
+              <div class="cdet"><div class="cdet-label">REGION</div><div class="cdet-val india-highlight" id="carbon-region">--</div></div>
+              <div class="cdet"><div class="cdet-label">SOURCE</div><div class="cdet-val" id="carbon-source">--</div></div>
+              <div class="cdet"><div class="cdet-label">THRESHOLD</div><div class="cdet-val" id="carbon-threshold">--</div></div>
+              <div class="cdet"><div class="cdet-label">FETCH TIME</div><div class="cdet-val" id="carbon-fetch-ms">--</div></div>
+              <div class="cdet"><div class="cdet-label">STRATEGY</div><div class="cdet-val" id="carbon-strategy">--</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Test Pruning Summary Card -->
+        <div class="card pruning-card" id="pruning-card">
+          <div class="card-header">
+            <div class="card-title">✂️ Test Pruning Results</div>
+            <div id="pruning-stage-badge" class="stage-badge pending">PENDING</div>
+          </div>
+          <div class="pruning-body">
+            <div class="pruning-stats">
+              <div class="pstat selected">
+                <div class="pstat-val" id="p-selected">--</div>
+                <div class="pstat-label">Selected</div>
+              </div>
+              <div class="pstat pruned">
+                <div class="pstat-val" id="p-pruned">--</div>
+                <div class="pstat-label">Pruned</div>
+              </div>
+              <div class="pstat total">
+                <div class="pstat-val" id="p-total">--</div>
+                <div class="pstat-label">Total</div>
+              </div>
+              <div class="pstat rate">
+                <div class="pstat-val" id="p-rate">--%</div>
+                <div class="pstat-label">Reduction</div>
+              </div>
+            </div>
+            <div class="confidence-row">
+              <span class="conf-label">Confidence</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" id="conf-bar" style="width:0%"></div></div>
+              </div>
+              <span class="conf-val" id="conf-val">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Test Details List -->
+        <div class="card test-list-card">
+          <div class="card-header">
+            <div class="card-title">🧪 Test Case Analysis</div>
+          </div>
+          <div id="test-list" class="test-list">
+            <div class="placeholder-text">Run analysis to see test details…</div>
+          </div>
+        </div>
+
+        <!-- Insights -->
+        <div class="card insight-card">
+          <div class="card-header">
+            <div class="card-title">💡 Insights</div>
+          </div>
+          <div class="insight-list" id="insight-list">
+            <div class="placeholder-text">Run analysis to see insights…</div>
+          </div>
+        </div>
+
+      </div><!-- /right-col -->
+    </div><!-- /dashboard-grid -->
+  </main>
+</div>
+
+<div id="notification-container"></div>
+<script src="/static/app.js"></script>
 </body>
 </html>

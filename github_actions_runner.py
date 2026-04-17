@@ -580,8 +580,13 @@ def run(
     set_actions_output("provider",      schedule.get("provider", PROVIDER))
     set_actions_output("zone",          schedule.get("selected_zone", "ap-south-1"))
     set_actions_output("carbon_score",  str(schedule.get("carbon_score", 0)))
-    set_actions_output("pruning_rate",  str(pruning_decision.get("pruning_rate", 0)))
-
+    raw_rate = pruning_decision.get("pruning_rate", 0)
+    if raw_rate == 0 and pruning_decision.get("prune"):
+        n_pruned = len(pruning_decision["prune"])
+        n_run    = len(schedule.get("schedule_now", [])) + len(schedule.get("historic_failure_tests", []))
+        total    = n_pruned + n_run
+        raw_rate = round(n_pruned / max(total, 1), 4)
+    set_actions_output("pruning_rate", f"{raw_rate:.4f}")
     # ── Step 7: Trigger workflow (optional) ───────────────────────────────────
     triggered = False
     if trigger_workflow and repo and GITHUB_TOKEN:

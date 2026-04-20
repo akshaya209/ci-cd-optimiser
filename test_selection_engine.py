@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
-
+from duplicate_detector import detect_duplicate_tests
 log = logging.getLogger("greenops.test_selection")
 logging.basicConfig(
     level=logging.INFO,
@@ -410,6 +410,33 @@ class TestSelectionEngine:
                     })
             total = len(all_tests)
             pruning_rate = round(len(pruned_tests) / max(total, 1), 4)
+            # ─────────────────────────────────────────────
+# Step 5: Duplicate pruning (ADD THIS)
+    # ─────────────────────────────────────────────
+            from duplicate_detector import detect_duplicate_tests
+  
+            log.info(
+            "select_tests [step 5]: running duplicate detection on %d candidate test(s)",
+            len(final_tests),
+            )
+
+            dedup_result = detect_duplicate_tests(final_tests)
+
+            if dedup_result.duplicate_tests:
+                pruned_tests.extend(dedup_result.duplicate_tests)
+                final_tests = dedup_result.unique_tests
+
+                log.info(
+                    "select_tests [step 5]: duplicate pruning removed %d test(s); %d remain",
+                    len(dedup_result.duplicate_tests),
+                    len(final_tests),
+                )
+            else:
+                log.info(
+                    "select_tests [step 5]: no duplicates detected; test list unchanged (%d tests)",
+                    len(final_tests),
+                )
+# ─────────────────────────────────────────────
             return {
                 "changed_modules": changed_modules,
                 "similarity_scores": similarity_scores,

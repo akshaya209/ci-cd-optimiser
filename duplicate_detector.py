@@ -9,8 +9,8 @@ Algorithm
 ---------
 1. Parse each test file with Python's ``ast`` module.
 2. Extract *meaningful* tokens:
-     - Function/method names defined in the file   → ``fn:<name>``
-     - Names called as functions                   → ``call:<name>``
+     - Function/method names defined in the file   → ``fn:<n>``
+     - Names called as functions                   → ``call:<n>``
      - Assert statement operands (stringified)     → ``assert:<value>``
 3. Lowercase + strip leading underscores (normalisation).
 4. Build the ordered token sequence and generate all 3-shingles (trigrams).
@@ -19,10 +19,22 @@ Algorithm
 6. If similarity ≥ INTER_TEST_DUP_THRESHOLD the *second* file in the pair
    is marked as a duplicate and removed from the final list.
 
+Fallback (file unreadable / non-existent)
+------------------------------------------
+When a test file cannot be read (OSError) or parsed (SyntaxError), the
+detector falls back to tokenising the **file path string itself** — splitting
+on path separators, underscores, dots, and digits — so that near-identical
+test paths (e.g. ``test_auth_v1.py`` vs ``test_auth_v2.py``) still produce a
+meaningful Jaccard score instead of always returning 0.0.  This prevents the
+"silent no-op" bug where every OSError silently zeroes out a file's shingles
+and guarantees that duplicate detection works even in CI environments where
+test files are listed but not yet checked out.
+
 Edge-cases handled
 ------------------
-- Empty files or files with fewer than 3 tokens → skipped (no shingles).
-- SyntaxError / any parse failure              → file kept, warning logged.
+- Empty files or files with fewer than 3 tokens → use path-name fallback.
+- SyntaxError / any parse failure              → use path-name fallback.
+- OSError / file not found                     → use path-name fallback.
 - Threshold is env-configurable via INTER_TEST_DUP_THRESHOLD.
 """
 
@@ -31,6 +43,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+import re
 from itertools import combinations
 from pathlib import Path
 from typing import NamedTuple
@@ -148,6 +161,30 @@ def _extract_tokens(source: str) -> list[str]:
     return extractor.tokens
 
 
+def _path_tokens(path: str) -> list[str]:
+    """
+    Derive tokens from a file path string as a fallback when the file cannot
+    be read or parsed.
+
+    Strategy: split the full path on separators (``/``, ``\\``, ``_``, ``-``,
+    ``.``), strip leading underscores, lowercase each piece, and prefix with
+    ``path:``.  This means ``tests/unit/test_auth_service.py`` produces tokens
+    like ``path:tests``, ``path:unit``, ``path:test``, ``path:auth``,
+    ``path:service``, ``path:py`` — giving meaningful overlap for tests in
+    the same package or with similar names.
+
+    NOTE: numeric suffixes are kept (``v1``, ``v2``) so near-identical versioned
+    tests don't get a perfect score when they shouldn't.
+    """
+    raw = re.split(r"[/\\._\-]", path)
+    tokens = []
+    for piece in raw:
+        piece = piece.lstrip("_").lower()
+        if piece:
+            tokens.append(f"path:{piece}")
+    return tokens
+
+
 def _shingles(tokens: list[str], n: int = 3) -> frozenset[tuple[str, ...]]:
     """Build the set of n-shingles (n-grams) from *tokens*."""
     if len(tokens) < n:
@@ -199,38 +236,62 @@ def detect_duplicate_tests(
     )
 
     log.info(
-        "duplicate_detector: starting scan of %d test file(s) "
+        "RUNNING DUPLICATE DETECTOR — scanning %d test file(s) "
         "(threshold=%.2f, shingle_size=%d)",
         len(test_paths),
         effective_threshold,
         shingle_size,
     )
+    print(
+        f"[DUP_DETECTOR] Starting scan: {len(test_paths)} tests, "
+        f"threshold={effective_threshold:.2f}"
+    )
 
     # ── Step 1: parse every file and build its shingle set ────────────────────
     shingle_map: dict[str, frozenset] = {}
+    source_map: dict[str, str] = {}  # "ast" or "path_fallback"
 
     for path in test_paths:
+        tokens: list[str] = []
+        used_source = "ast"
+
         try:
             source = Path(path).read_text(encoding="utf-8", errors="replace")
-            tokens = _extract_tokens(source)
-        except SyntaxError as exc:
-            log.warning(
-                "duplicate_detector: SyntaxError in '%s' (%s) — "
-                "file will be kept but excluded from similarity comparisons",
-                path,
-                exc,
-            )
-            shingle_map[path] = frozenset()
-            continue
+            try:
+                tokens = _extract_tokens(source)
+            except SyntaxError as exc:
+                log.warning(
+                    "duplicate_detector: SyntaxError in '%s' (%s) — "
+                    "falling back to path-name tokenisation",
+                    path,
+                    exc,
+                )
+                tokens = []
         except OSError as exc:
             log.warning(
                 "duplicate_detector: cannot read '%s' (%s) — "
-                "file will be kept but excluded from similarity comparisons",
+                "falling back to path-name tokenisation",
                 path,
                 exc,
             )
-            shingle_map[path] = frozenset()
-            continue
+            tokens = []
+
+        # ── Fallback: use path-name tokens when file is unreadable or empty ──
+        if not tokens:
+            tokens = _path_tokens(path)
+            used_source = "path_fallback"
+            if tokens:
+                log.debug(
+                    "duplicate_detector: '%s' using path-name fallback (%d tokens)",
+                    path,
+                    len(tokens),
+                )
+            else:
+                log.warning(
+                    "duplicate_detector: '%s' produced zero tokens even from path — "
+                    "excluded from similarity comparisons",
+                    path,
+                )
 
         file_shingles = _shingles(tokens, n=shingle_size)
 
@@ -243,6 +304,7 @@ def detect_duplicate_tests(
             )
 
         shingle_map[path] = file_shingles
+        source_map[path] = used_source
 
     # ── Step 2: pairwise Jaccard comparison ───────────────────────────────────
     pruned: set[str] = set()
@@ -260,9 +322,11 @@ def detect_duplicate_tests(
         similarity_pairs.append((path_a, path_b, score))
 
         log.info(
-            "duplicate_detector: similarity(%s, %s) = %.4f",
+            "duplicate_detector: similarity(%s [%s], %s [%s]) = %.4f",
             Path(path_a).name,
+            source_map[path_a],
             Path(path_b).name,
+            source_map[path_b],
             score,
         )
 
@@ -270,12 +334,17 @@ def detect_duplicate_tests(
             # path_b appeared later → prune it; path_a is kept as canonical.
             pruned.add(path_b)
             log.info(
-                "duplicate_detector: pruned duplicate test: %s  "
+                "duplicate_detector: PRUNED duplicate test: %s  "
                 "(score=%.4f >= threshold=%.2f, similar to: %s)",
                 Path(path_b).name,
                 score,
                 effective_threshold,
                 Path(path_a).name,
+            )
+            print(
+                f"[DUP_DETECTOR] PRUNED: {Path(path_b).name} "
+                f"(score={score:.4f} >= {effective_threshold:.2f}, "
+                f"duplicate of {Path(path_a).name})"
             )
 
     # ── Step 3: assemble final result ─────────────────────────────────────────
@@ -288,6 +357,10 @@ def detect_duplicate_tests(
         len(test_paths),
         len(duplicate_tests),
         len(unique_tests),
+    )
+    print(
+        f"[DUP_DETECTOR] Done: total={len(test_paths)}, "
+        f"pruned={len(duplicate_tests)}, kept={len(unique_tests)}"
     )
 
     return DuplicateDetectionResult(

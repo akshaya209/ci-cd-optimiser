@@ -410,33 +410,6 @@ class TestSelectionEngine:
                     })
             total = len(all_tests)
             pruning_rate = round(len(pruned_tests) / max(total, 1), 4)
-            # ─────────────────────────────────────────────
-# Step 5: Duplicate pruning (ADD THIS)
-    # ─────────────────────────────────────────────
-            from duplicate_detector import detect_duplicate_tests
-  
-            log.info(
-            "select_tests [step 5]: running duplicate detection on %d candidate test(s)",
-            len(final_tests),
-            )
-
-            dedup_result = detect_duplicate_tests(final_tests)
-
-            if dedup_result.duplicate_tests:
-                pruned_tests.extend(dedup_result.duplicate_tests)
-                final_tests = dedup_result.unique_tests
-
-                log.info(
-                    "select_tests [step 5]: duplicate pruning removed %d test(s); %d remain",
-                    len(dedup_result.duplicate_tests),
-                    len(final_tests),
-                )
-            else:
-                log.info(
-                    "select_tests [step 5]: no duplicates detected; test list unchanged (%d tests)",
-                    len(final_tests),
-                )
-# ─────────────────────────────────────────────
             return {
                 "changed_modules": changed_modules,
                 "similarity_scores": similarity_scores,
@@ -597,7 +570,33 @@ class TestSelectionEngine:
                 "selection_strategy":     "embedding_similarity+dependency_graph+xgboost",
             },
         }
+        # ─────────────────────────────────────────────
+# Step 5: Duplicate pruning (ADD HERE)
+# ─────────────────────────────────────────────
+        from duplicate_detector import detect_duplicate_tests
 
+        log.info("RUNNING DUPLICATE DETECTOR...")
+        print("FINAL TESTS BEFORE DEDUP:", final_tests)
+
+        dedup_result = detect_duplicate_tests(final_tests)
+
+        if dedup_result.duplicate_tests:
+            pruned_tests.extend(dedup_result.duplicate_tests)
+            final_tests = dedup_result.unique_tests
+
+            log.info(f"Pruned {len(dedup_result.duplicate_tests)} duplicates")
+        else:
+            log.info("No duplicates found")
+
+# IMPORTANT: update result AFTER pruning
+        result["final_tests"] = sorted(final_tests)
+        result["pruned_tests"] = sorted(pruned_tests)
+  
+        total = len(result["final_tests"]) + len(result["pruned_tests"])
+        result["summary"]["tests_selected"] = len(final_tests)
+        result["summary"]["tests_pruned"] = len(pruned_tests)
+        result["summary"]["pruning_rate"] = round(len(pruned_tests)/max(total,1), 4)
+# ─────────────────────────────────────────────
         # Persist final selection for audit
         if self._store:
             self._store.log_pr_run(

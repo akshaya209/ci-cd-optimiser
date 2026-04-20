@@ -68,7 +68,7 @@ CARBON_THRESHOLD    = float(os.environ.get("GREENOPS_CARBON_THRESHOLD", "500"))
 # Min similarity below which we ALWAYS run (hash changed + low sim = high risk)
 HIGH_RISK_SIM_BOUND = float(os.environ.get("GREENOPS_HIGH_RISK_SIM", "0.40"))
 # Max impact score below which tests are candidates for pruning
-IMPACT_SCORE_PRUNE  = float(os.environ.get("GREENOPS_IMPACT_PRUNE", "0.15"))
+IMPACT_SCORE_PRUNE  = float(os.environ.get("GREENOPS_IMPACT_PRUNE", "0.25"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

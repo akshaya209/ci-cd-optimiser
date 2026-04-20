@@ -406,8 +406,8 @@ def stage_schedule(pruning_decision: dict, carbon: dict) -> dict:
     try:
         from carbon_aware_scheduler import CarbonAwareScheduler
         scheduler = CarbonAwareScheduler(
-            carbon_zone      = carbon["zone"],
-            carbon_intensity = carbon["intensity"],
+            zone      = carbon["zone"],
+            provider = carbon.get("provider", "aws"),
         )
         return scheduler.schedule(pruning_decision)
     except Exception as exc:

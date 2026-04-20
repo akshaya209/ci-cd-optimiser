@@ -457,10 +457,8 @@ def stage_post_pr_comment(
     try:
         from github_actions_runner import post_pr_comment, build_pr_comment
         comment_body = build_pr_comment(
-            repo     = repo,
             schedule = schedule,
-            result   = result,
-            carbon   = carbon,
+            pruning_decision   = result,
         )
         post_pr_comment(repo, pr_number, comment_body)
     except Exception as exc:

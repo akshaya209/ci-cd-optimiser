@@ -410,24 +410,20 @@ class TestSelectionEngine:
                     })
             total = len(all_tests)
 
-            # ── Duplicate detection (fallback path) ──────────────────────────
-            log.info("RUNNING DUPLICATE DETECTOR (fallback path)")
-            print("[TSE] FINAL TESTS BEFORE DEDUP (fallback):", final_tests)
-            dedup_result = detect_duplicate_tests(final_tests)
-            if dedup_result.duplicate_tests:
-                for dup in dedup_result.duplicate_tests:
+            # ── Duplicate pruning (fallback path) ────────────────────────────
+            log.info("RUNNING DUPLICATE DETECTOR (fallback path)...")
+            print("DEBUG: BEFORE DEDUP", final_tests)
+            dedup_fb = detect_duplicate_tests(final_tests)
+            if dedup_fb.duplicate_tests:
+                for dup in dedup_fb.duplicate_tests:
                     pruned_tests.append(dup)
-                    # update explanation decision for the pruned duplicate
                     for exp in explanations:
                         if exp["test"] == dup and exp["decision"] == "RUN":
                             exp["decision"] = "PRUNE"
                             exp["reason"] = "DUPLICATE_TEST_PRUNED"
                             break
-                final_tests = dedup_result.unique_tests
-                log.info(
-                    "Fallback dedup pruned %d duplicate(s)",
-                    len(dedup_result.duplicate_tests),
-                )
+                final_tests = dedup_fb.unique_tests
+                log.info("Fallback dedup removed %d duplicate(s)", len(dedup_fb.duplicate_tests))
             else:
                 log.info("Fallback dedup: no duplicates found")
 
@@ -564,14 +560,9 @@ class TestSelectionEngine:
                 "triggered_by": c.triggered_by[:3],
             })
 
-        total_discovered = len(candidates)
-        pruning_rate = round(
-            len(pruned_tests) / max(total_discovered, 1), 4
-        )
-
-        # ── Step 5: Duplicate pruning ─────────────────────────────────────────
-        log.info("RUNNING DUPLICATE DETECTOR (main path)")
-        print("[TSE] FINAL TESTS BEFORE DEDUP (main):", final_tests)
+        # ── Step 5: Duplicate pruning (runs BEFORE result dict is built) ──────
+        log.info("RUNNING DUPLICATE DETECTOR...")
+        print("DEBUG: BEFORE DEDUP", final_tests)
 
         dedup_result = detect_duplicate_tests(final_tests)
 
@@ -579,14 +570,14 @@ class TestSelectionEngine:
             pruned_tests.extend(dedup_result.duplicate_tests)
             final_tests = dedup_result.unique_tests
             log.info(
-                "Main path dedup pruned %d duplicate(s): %s",
+                "Duplicate pruning removed %d test(s): %s",
                 len(dedup_result.duplicate_tests),
                 [Path(p).name for p in dedup_result.duplicate_tests],
             )
         else:
-            log.info("Main path dedup: no duplicates found")
+            log.info("Duplicate pruning: no duplicates found")
 
-        # ── Step 6: Build result dict (AFTER dedup so counts are correct) ────
+        # ── Step 6: Build result dict AFTER dedup so all counts are correct ──
         total_after_dedup = len(final_tests) + len(pruned_tests)
         pruning_rate = round(len(pruned_tests) / max(total_after_dedup, 1), 4)
 
@@ -613,7 +604,6 @@ class TestSelectionEngine:
                 "selection_strategy":     "embedding_similarity+dependency_graph+xgboost",
             },
         }
-
         # Persist final selection for audit
         if self._store:
             self._store.log_pr_run(

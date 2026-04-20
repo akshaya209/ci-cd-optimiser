@@ -1,580 +1,597 @@
-/* ============================================================
-   GreenOps Dashboard — app.js
-   Carbon-Aware CI/CD Test Suite Reduction
-   ============================================================ */
+/* ============================================================================
+   GREENOPS FRONTEND v2.0 — Fixed & Complete
+   All dashboard metrics populated from real pipeline logic.
+   New LLM Explain page. Real vis-network graph. Proper error handling.
+   ============================================================================ */
 
-document.addEventListener('DOMContentLoaded', () => {
-
-  // ── State ──────────────────────────────────────────────────────────────────
-  let cy = null;
-  const state = {
-    graphData:  null,
-    reportData: null,
-    polling:    null,
-  };
-
-  // ── DOM refs ───────────────────────────────────────────────────────────────
-  const $ = id => document.getElementById(id);
-
-  const runBtn            = $('run-btn');
-  const repoInput         = $('repo-input');
-  const prInput           = $('pr-input');
-  const pipelineChip      = $('pipeline-status-chip');
-
-  // sidebar metrics
-  const carbonVal         = $('carbon-val');
-  const carbonBadge       = $('carbon-badge');
-  const carbonZoneLabel   = $('carbon-zone-label');
-  const carbonSourceLabel = $('carbon-source-label');
-  const savingsVal        = $('savings-val');
-  const totalTestsVal     = $('total-tests-val');
-  const savingsPct        = $('savings-pct');
-  const pruningBar        = $('pruning-bar');
-  const repoName          = $('repo-name');
-  const prNumber          = $('pr-number');
-
-  // Carbon detail card
-  const carbonDetailVal   = $('carbon-detail-val');
-  const carbonZone        = $('carbon-zone');
-  const carbonRegion      = $('carbon-region');
-  const carbonSource      = $('carbon-source');
-  const carbonThreshold   = $('carbon-threshold');
-  const carbonFetchMs     = $('carbon-fetch-ms');
-  const carbonStrategy    = $('carbon-strategy');
-  const carbonStageBadge  = $('carbon-stage-badge');
-
-  // AST card
-  const astBadge          = $('ast-badge');
-  const astFiles          = $('ast-files');
-  const astFunctions      = $('ast-functions');
-  const astClasses        = $('ast-classes');
-  const astTime           = $('ast-time');
-
-  // Embed card
-  const embedBadge        = $('embed-badge');
-  const embedModules      = $('embed-modules');
-  const embedVectors      = $('embed-vectors');
-  const embedCache        = $('embed-cache');
-  const embedTime         = $('embed-time');
-
-  // Pruning card
-  const pSelected         = $('p-selected');
-  const pPruned           = $('p-pruned');
-  const pTotal            = $('p-total');
-  const pRate             = $('p-rate');
-  const confBar           = $('conf-bar');
-  const confVal           = $('conf-val');
-  const pruningBadge      = $('pruning-stage-badge');
-
-  const testList          = $('test-list');
-  const insightList       = $('insight-list');
-
-  // Node detail overlay
-  const nodeDetails       = $('node-details');
-  const detailName        = $('detail-node-name');
-  const detailType        = $('detail-node-type');
-  const detailSim         = $('detail-sim-score');
-  const detailPf          = $('detail-pf-score');
-  const detailStatus      = $('detail-status');
-
-  // ── Stepper helpers ────────────────────────────────────────────────────────
-  const STEPS = ['input','dep_graph','ast','embed','carbon','selection','pruning'];
-
-  function setStep(stepId, status) {
-    const el = document.querySelector(`[data-step="${stepId}"]`);
-    if (!el) return;
-    el.classList.remove('done','active','error');
-    if (status) el.classList.add(status);
-  }
-
-  function markAllDone() {
-    STEPS.forEach(s => setStep(s, 'done'));
-  }
-
-  function markUpTo(stepId) {
-    const idx = STEPS.indexOf(stepId);
-    STEPS.forEach((s, i) => {
-      if (i < idx)       setStep(s, 'done');
-      else if (i === idx) setStep(s, 'active');
-      else               setStep(s, '');
-    });
-  }
-
-  // ── Stage badge helper ─────────────────────────────────────────────────────
-  function setBadge(el, status) {
-    if (!el) return;
-    el.className = 'stage-badge';
-    const map = {
-      pending:   ['pending', 'PENDING'],
-      running:   ['running', 'RUNNING'],
-      completed: ['completed', 'DONE'],
-      done:      ['completed', 'DONE'],
-      error:     ['error', 'ERROR'],
+class GreenOpsApp {
+  constructor() {
+    this.state = {
+      pipelineResult: null,
+      loading: false,
+      error: null,
+      currentPage: 'dashboard',
     };
-    const [cls, label] = map[status] || ['pending','PENDING'];
-    el.classList.add(cls);
-    el.textContent = label;
+    this.chartInstance    = null;
+    this.networkInstance  = null;
+    this.diffText         = null;
+    this.init();
   }
 
-  // ── Number animation ───────────────────────────────────────────────────────
-  function animateValue(el, from, to, dur = 800) {
-    if (!el || from === to) return;
-    let t0 = null;
-    const step = ts => {
-      if (!t0) t0 = ts;
-      const p = Math.min((ts - t0) / dur, 1);
-      el.textContent = Math.floor(p * (to - from) + from);
-      if (p < 1) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
+  init() {
+    this.attachEventListeners();
+    this.setActivePage('dashboard');
   }
 
-  // ── Zone → friendly region name ────────────────────────────────────────────
-  function zoneToRegion(zone) {
-    if (!zone) return '--';
-    const map = {
-      'IN-SO': '🇮🇳 India — South',
-      'IN-NO': '🇮🇳 India — North',
-      'IN-EA': '🇮🇳 India — East',
-      'IN-WE': '🇮🇳 India — West',
-      'IN-NE': '🇮🇳 India — North-East',
-      'GB':    '🇬🇧 Great Britain',
-      'DE':    '🇩🇪 Germany',
-      'FR':    '🇫🇷 France',
-      'IE':    '🇮🇪 Ireland',
-      'US-CAL-CISO': '🇺🇸 US — California',
-      'US-NY-NYIS':  '🇺🇸 US — New York',
-      'SG':    '🇸🇬 Singapore',
-      'AU-NSW':'🇦🇺 Australia — NSW',
-      'JP-TK': '🇯🇵 Japan — Tokyo',
-      'NL':    '🇳🇱 Netherlands',
-      'BE':    '🇧🇪 Belgium',
-    };
-    return map[zone] || zone;
-  }
+  // ══════════════════════════════════════════════════════════════════════════
+  // EVENT LISTENERS
+  // ══════════════════════════════════════════════════════════════════════════
 
-  // ── Update all UI sections from report ────────────────────────────────────
-  function updateAllSections(report) {
-    if (!report) return;
-
-    const s       = report.summary || {};
-    const carbon  = report.carbon  || {};
-    const timings = report.timings_ms || {};
-    const stages  = report.stages  || {};
-
-    // breadcrumb
-    repoName.textContent = report.repo       || '--';
-    prNumber.textContent = report.pr_number  || '--';
-
-    // ── Sidebar carbon ────────────────────────────────────────────────────
-    const ci = s.carbon_intensity || carbon.intensity || 0;
-    animateValue(carbonVal, parseInt(carbonVal.textContent) || 0, Math.round(ci));
-    const exceeded = s.carbon_threshold_exceeded;
-    carbonVal.style.color = exceeded ? 'var(--accent-red)' : 'var(--accent-green-bright)';
-    carbonBadge.textContent = exceeded ? '⚠ HIGH' : '✓ OK';
-    carbonBadge.style.background  = exceeded ? 'rgba(248,81,73,0.15)' : 'rgba(63,185,80,0.15)';
-    carbonBadge.style.color       = exceeded ? 'var(--accent-red)' : 'var(--accent-green-bright)';
-    carbonBadge.style.borderColor = exceeded ? 'rgba(248,81,73,0.3)' : 'rgba(63,185,80,0.3)';
-
-    const zone = s.carbon_zone || carbon.zone || '';
-    carbonZoneLabel.textContent   = zone || '--';
-    carbonSourceLabel.textContent = s.carbon_source || carbon.source || '--';
-
-    // ── Sidebar pruning ───────────────────────────────────────────────────
-    const pruned   = s.tests_pruned   || (report.pruned_tests ? report.pruned_tests.length : 0);
-    const selected = s.tests_selected || (report.final_tests  ? report.final_tests.length  : 0);
-    const total    = pruned + selected;
-    const rate     = s.pruning_rate   || (total > 0 ? pruned / total : 0);
-
-    animateValue(savingsVal,    parseInt(savingsVal.textContent)    || 0, pruned);
-    animateValue(totalTestsVal, parseInt(totalTestsVal.textContent) || 0, total);
-    savingsPct.textContent = Math.round(rate * 100) + '%';
-    pruningBar.style.width = Math.round(rate * 100) + '%';
-
-    // ── Carbon detail card ────────────────────────────────────────────────
-    setBadge(carbonStageBadge, stages.carbon_fetch_ms !== undefined ? 'completed' : 'pending');
-    setStep('carbon', 'done');
-    carbonDetailVal.textContent  = Math.round(ci);
-    carbonDetailVal.style.color  = exceeded ? 'var(--accent-red)' : 'var(--accent-green-bright)';
-    carbonZone.textContent       = zone || '--';
-    carbonRegion.textContent     = zoneToRegion(zone);
-    carbonSource.textContent     = s.carbon_source || carbon.source || '--';
-    carbonThreshold.textContent  = s.carbon_threshold ? Math.round(s.carbon_threshold) + ' gCO₂/kWh' : '--';
-    carbonFetchMs.textContent    = timings.carbon_fetch_ms !== undefined ? timings.carbon_fetch_ms + ' ms' : '--';
-    carbonStrategy.textContent   = s.selection_strategy || '--';
-
-    // ── AST stage ─────────────────────────────────────────────────────────
-    const ast = report.ast_summary || {};
-    const astMs = stages.module_extraction_ms || timings.module_extraction_ms;
-    // We infer AST ran if module_extraction_ms exists in stages
-    const astStatus = astMs !== undefined ? 'completed' : 'pending';
-    setBadge(astBadge, astStatus);
-    setStep('ast', astStatus === 'completed' ? 'done' : '');
-    if (ast.files_parsed !== undefined) {
-      astFiles.textContent     = ast.files_parsed;
-      astFunctions.textContent = ast.functions_found || '--';
-      astClasses.textContent   = ast.classes_found   || '--';
-    } else if (astMs !== undefined) {
-      // No dedicated ast_summary block but extraction ran — show timing
-      astFiles.textContent     = '✓';
-      astFunctions.textContent = '✓';
-      astClasses.textContent   = '✓';
-    }
-    astTime.textContent = astMs !== undefined ? astMs : '--';
-
-    // ── Embeddings stage ──────────────────────────────────────────────────
-    const emb = report.embedding_summary || {};
-    const embMs = stages.module_extraction_ms || timings.module_extraction_ms;
-    const embStatus = embMs !== undefined ? 'completed' : 'pending';
-    setBadge(embedBadge, embStatus);
-    setStep('embed', embStatus === 'completed' ? 'done' : '');
-    if (emb.modules_embedded !== undefined) {
-      embedModules.textContent = emb.modules_embedded;
-      embedVectors.textContent = emb.vectors_stored || '--';
-      embedCache.textContent   = emb.cache_hits     || '0';
-    } else if (embMs !== undefined) {
-      embedModules.textContent = '✓';
-      embedVectors.textContent = '✓';
-      embedCache.textContent   = '--';
-    }
-    embedTime.textContent = embMs !== undefined ? embMs : '--';
-
-    // ── Pruning card ──────────────────────────────────────────────────────
-    const selMs = stages.test_selection_ms || timings.test_selection_ms;
-    setBadge(pruningBadge, selMs !== undefined ? 'completed' : 'pending');
-    setStep('selection', selMs !== undefined ? 'done' : '');
-    setStep('pruning',   selMs !== undefined ? 'done' : '');
-
-    animateValue(pSelected, parseInt(pSelected.textContent) || 0, selected);
-    animateValue(pPruned,   parseInt(pPruned.textContent)   || 0, pruned);
-    animateValue(pTotal,    parseInt(pTotal.textContent)    || 0, total);
-    pRate.textContent = Math.round(rate * 100) + '%';
-
-    const conf = s.confidence || 0;
-    confBar.style.width = Math.round(conf * 100) + '%';
-    confVal.textContent = conf ? conf.toFixed(2) : '--';
-
-    // ── Test detail list ──────────────────────────────────────────────────
-    const details = report.test_details || [];
-    const finalTests  = report.final_tests  || [];
-    const prunedTests = report.pruned_tests || [];
-
-    // Build from test_details if present, else from final/pruned arrays
-    let rows = [];
-    if (details.length > 0) {
-      rows = details.map(d => ({
-        name:     d.test || d.test_name || '?',
-        sim:      d.sim_score,
-        pf:       d.pf_score,
-        status:   d.status,
-      }));
-    } else {
-      finalTests.forEach(t => rows.push({ name: t, status: 'RUN',   sim: null, pf: null }));
-      prunedTests.forEach(t => rows.push({ name: t, status: 'PRUNE', sim: null, pf: null }));
-    }
-
-    if (rows.length === 0) {
-      testList.innerHTML = '<div class="placeholder-text">No test details available.</div>';
-    } else {
-      testList.innerHTML = rows.map(r => {
-        const isPruned = r.status === 'PRUNE' || r.status === 'PRUNED';
-        const simF = r.sim ? parseFloat(r.sim) : null;
-        const simClass = simF !== null ? (simF > 0.7 ? 'high' : simF < 0.3 ? 'low' : '') : '';
-        return `<div class="module-item${isPruned ? ' pruned-row' : ''}">
-          <span class="module-name" title="${r.name}">
-            ${isPruned ? '✂' : '✓'} ${r.name.split('/').pop()}
-          </span>
-          <div class="test-badges">
-            ${r.sim !== null ? `<span class="similarity-badge ${simClass}">${r.sim} SIM</span>` : ''}
-            <span class="status-pill ${isPruned ? 'pill-prune' : 'pill-run'}">${r.status}</span>
-          </div>
-        </div>`;
-      }).join('');
-    }
-
-    // ── Insights ──────────────────────────────────────────────────────────
-    const insights = [];
-    if (exceeded) {
-      insights.push(`<div class="insight-item warning">⚠️ Carbon intensity ${Math.round(ci)} gCO₂/kWh exceeds threshold — aggressive pruning applied to reduce emissions.</div>`);
-    } else {
-      insights.push(`<div class="insight-item success">✅ Carbon within safe limits (${Math.round(ci)} gCO₂/kWh). Selective pruning active.</div>`);
-    }
-    if (zone && zone.startsWith('IN')) {
-      insights.push(`<div class="insight-item india">🇮🇳 India grid zone <strong>${zone}</strong> detected. Using India-specific carbon intensity data.</div>`);
-    }
-    if (rate > 0.5) {
-      insights.push(`<div class="insight-item">🚀 <strong>${Math.round(rate * 100)}%</strong> of tests pruned — CI/CD run time and carbon cost reduced significantly.</div>`);
-    }
-    const totalMs = timings.total_ms || (timings.dep_graph_ms + timings.test_selection_ms);
-    if (totalMs) {
-      insights.push(`<div class="insight-item">⏱️ Full pipeline completed in <strong>${totalMs}ms</strong>.</div>`);
-    }
-    if (s.confidence) {
-      insights.push(`<div class="insight-item">🎯 Pruner confidence: <strong>${(s.confidence * 100).toFixed(0)}%</strong>${s.confidence < 0.6 ? ' (fallback to FULL_RUN)' : ''}.</div>`);
-    }
-    if (report.changed_modules && report.changed_modules.length) {
-      insights.push(`<div class="insight-item">📦 Changed modules: <strong>${report.changed_modules.map(m => m.split('/').pop()).join(', ')}</strong>.</div>`);
-    }
-    insightList.innerHTML = insights.join('');
-
-    // Stepper: mark all done
-    setStep('input', 'done');
-    setStep('dep_graph', 'done');
-    markAllDone();
-  }
-
-  // ── Graph ──────────────────────────────────────────────────────────────────
-  function initGraph(data) {
-    if (!data) return;
-    const elements    = [];
-    const moduleGraph = data.module_graph || {};
-    const testMap     = data.test_map     || {};
-    const nodes       = new Set();
-
-    Object.keys(moduleGraph).forEach(mod => {
-      nodes.add(mod);
-      (moduleGraph[mod] || []).forEach(dep => {
-        nodes.add(dep);
-        elements.push({ data: { id: `${mod}→${dep}`, source: mod, target: dep, type: 'import' } });
+  attachEventListeners() {
+    document.querySelectorAll('.nav-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        this.setActivePage(e.currentTarget.dataset.page);
       });
     });
-
-    Object.keys(testMap).forEach(mod => {
-      (testMap[mod] || []).forEach(test => {
-        nodes.add(test);
-        elements.push({ data: { id: `${test}→${mod}`, source: test, target: mod, type: 'test-link' } });
-      });
-    });
-
-    const report      = state.reportData || {};
-    const testDetails = (report.test_details || []);
-    const prunedTests = report.pruned_tests || [];
-    const changedMods = report.changed_modules || [];
-
-    const cyNodes = Array.from(nodes).map(node => {
-      const isTest    = node.toLowerCase().includes('test') || node.toLowerCase().includes('spec');
-      const isChanged = changedMods.includes(node);
-      const isPruned  = prunedTests.includes(node);
-      const detail    = testDetails.find(d => d.test === node || d.test_name === node);
-      return {
-        data: {
-          id:       node,
-          label:    node.split('/').pop(),
-          type:     isTest ? 'test' : 'module',
-          isChanged,
-          isPruned,
-          simScore: detail ? detail.sim_score : (isTest ? '0.500' : '1.000'),
-          pfScore:  detail ? detail.pf_score  : (isTest ? '0.500' : '0.000'),
-        }
-      };
-    });
-
-    if (cy) { cy.destroy(); cy = null; }
-
-    cy = cytoscape({
-      container: document.getElementById('cy'),
-      elements:  [...cyNodes, ...elements],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'label':              'data(label)',
-            'color':              '#8b949e',
-            'font-size':          '9px',
-            'font-family':        'JetBrains Mono, monospace',
-            'background-color':   '#21262d',
-            'width': 22, 'height': 22,
-            'text-valign':        'bottom',
-            'text-margin-y':      5,
-            'border-width':       2,
-            'border-color':       '#30363d',
-            'transition-property':'background-color, border-color, width, height',
-            'transition-duration':'0.3s',
-          }
-        },
-        {
-          selector: 'node[type="module"]',
-          style: { 'background-color': '#1f6feb', 'width': 26, 'height': 26, 'border-color': 'rgba(88,166,255,0.4)' }
-        },
-        {
-          selector: 'node[?isChanged]',
-          style: { 'border-color': '#f85149', 'border-width': 3, 'width': 30, 'height': 30 }
-        },
-        {
-          selector: 'node[type="test"]',
-          style: { 'background-color': '#238636', 'shape': 'hexagon', 'border-color': 'rgba(63,185,80,0.4)' }
-        },
-        {
-          selector: 'node[?isPruned]',
-          style: { 'background-color': '#484f58', 'border-color': '#30363d', 'opacity': 0.5 }
-        },
-        {
-          selector: 'edge',
-          style: {
-            'width': 1.5, 'line-color': '#30363d', 'target-arrow-color': '#30363d',
-            'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'opacity': 0.4, 'arrow-scale': 0.8,
-          }
-        },
-        {
-          selector: 'edge[type="test-link"]',
-          style: { 'line-style': 'dashed', 'line-color': '#3fb950', 'opacity': 0.2 }
-        },
-        { selector: '.highlighted', style: { 'border-color': '#58a6ff', 'border-width': 4, 'line-color': '#58a6ff', 'target-arrow-color': '#58a6ff', 'opacity': 1, 'z-index': 999 } },
-        { selector: '.dimmed',      style: { 'opacity': 0.12 } },
-      ],
-      layout: { name: 'cose', padding: 40, animate: true, componentSpacing: 80, nodeRepulsion: 4000, idealEdgeLength: 60 }
-    });
-
-    const nodeCount = cy.nodes().length;
-    const edgeCount = cy.edges().length;
-    $('graph-meta').textContent = `${nodeCount} nodes · ${edgeCount} edges`;
-
-    cy.on('tap', 'node', evt => {
-      const n = evt.target;
-      detailName.textContent   = n.data('label');
-      detailType.textContent   = n.data('type').toUpperCase();
-      detailSim.textContent    = n.data('simScore');
-      detailPf.textContent     = n.data('pfScore');
-      const isPruned           = n.data('isPruned');
-      const isChanged          = n.data('isChanged');
-      detailStatus.textContent = isPruned ? 'PRUNED' : (isChanged ? 'CHANGED' : 'RUN');
-      detailStatus.style.color = isPruned ? 'var(--text-secondary)' : (isChanged ? 'var(--accent-red)' : 'var(--accent-green-bright)');
-      nodeDetails.classList.add('active');
-      cy.elements().addClass('dimmed').removeClass('highlighted');
-      n.removeClass('dimmed').addClass('highlighted');
-      n.neighborhood().removeClass('dimmed').addClass('highlighted');
-    });
-
-    cy.on('tap', evt => {
-      if (evt.target === cy) {
-        nodeDetails.classList.remove('active');
-        cy.elements().removeClass('dimmed').removeClass('highlighted');
-      }
-    });
+    document.getElementById('run-button').addEventListener('click', () => this.runPipeline());
+    document.getElementById('diff-upload').addEventListener('change', (e) => this.handleDiffUpload(e));
   }
 
-  // ── Fetch both graph + report, update all sections ─────────────────────────
-  async function fetchAndRender() {
-    try {
-      const [graphRes, reportRes] = await Promise.all([
-        fetch('/api/graph').catch(() => null),
-        fetch('/api/report').catch(() => null),
-      ]);
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE NAVIGATION
+  // ══════════════════════════════════════════════════════════════════════════
 
-      if (graphRes && graphRes.ok) {
-        state.graphData = await graphRes.json();
-      }
-
-      if (reportRes && reportRes.ok) {
-        const data = await reportRes.json();
-        if (!data.error) {
-          state.reportData = data;
-        }
-      }
-
-      if (state.graphData) initGraph(state.graphData);
-      if (state.reportData) updateAllSections(state.reportData);
-
-    } catch (err) {
-      console.error('fetchAndRender error:', err);
+  setActivePage(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const pageEl = document.getElementById(`page-${page}`);
+    if (pageEl) {
+      pageEl.classList.add('active');
+      this.state.currentPage = page;
+      document.querySelectorAll('.nav-item').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.page === page);
+      });
+      if (this.state.pipelineResult) this.renderPageContent(page);
     }
   }
 
-  // ── Pipeline polling ───────────────────────────────────────────────────────
-  function startPolling() {
-    if (state.polling) clearInterval(state.polling);
-    state.polling = setInterval(async () => {
-      try {
-        const res  = await fetch('/api/run-status');
-        const data = await res.json();
-        const s    = data.status;
-
-        if (s === 'running') {
-          setPipelineChip('running');
-          // try a partial refresh
-          await fetchAndRender();
-        } else if (s === 'done' || s === 'error') {
-          clearInterval(state.polling);
-          state.polling = null;
-          setPipelineChip(s);
-          await fetchAndRender();
-          notify(s === 'done' ? '✅ Pipeline complete!' : '❌ Pipeline error — check logs.', s === 'done' ? 'success' : 'error');
-          runBtn.disabled = false;
-          runBtn.querySelector('.btn-label').textContent = 'Run Analysis';
-        }
-      } catch (_) {}
-    }, 1800);
+  renderPageContent(page) {
+    switch (page) {
+      case 'dashboard':   this.renderDashboard();   break;
+      case 'dependency':  this.renderDependency();   break;
+      case 'carbon':      this.renderCarbon();        break;
+      case 'ml':          this.renderML();             break;
+      case 'cicd':        this.renderCICD();           break;
+      case 'explain':     this.renderExplain();        break;
+    }
   }
 
-  function setPipelineChip(status) {
-    const map = {
-      idle:    ['idle',    '● IDLE'],
-      running: ['running', '⟳ RUNNING'],
-      done:    ['done',    '✓ DONE'],
-      error:   ['error',   '✕ ERROR'],
-    };
-    const [cls, label] = map[status] || ['idle', '● IDLE'];
-    pipelineChip.className = `pipeline-chip ${cls}`;
-    pipelineChip.textContent = label;
-  }
+  // ══════════════════════════════════════════════════════════════════════════
+  // PIPELINE EXECUTION
+  // ══════════════════════════════════════════════════════════════════════════
 
-  // ── Submit handler ─────────────────────────────────────────────────────────
-  runBtn.addEventListener('click', async () => {
-    const repo = repoInput.value.trim();
-    const pr   = parseInt(prInput.value.trim()) || 0;
-
-    if (!repo) { notify('Enter a repository (owner/repo)', 'error'); return; }
-
-    runBtn.disabled = true;
-    runBtn.querySelector('.btn-label').textContent = 'Running…';
-    setPipelineChip('running');
-
-    // Mark all steps pending then activate first
-    STEPS.forEach(s => setStep(s, ''));
-    setStep('input', 'active');
+  async runPipeline() {
+    this.state.loading = true;
+    this.setButtonLoading(true);
+    this.updateStatus('loading', 'Running pipeline…');
 
     try {
-      const res  = await fetch('/api/run', {
+      const payload = this.getPipelinePayload();
+      const resp = await fetch('/api/pipeline', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repo, pr_number: pr }),
+        body:    JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data.status === 'started') {
-        setStep('input', 'done');
-        markUpTo('dep_graph');
-        notify('Pipeline started — polling for results…', 'success');
-        startPolling();
-      } else {
-        throw new Error(data.message || 'Unknown error');
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || 'Pipeline failed');
       }
+
+      this.state.pipelineResult = await resp.json();
+      this.state.error = null;
+      this.updateStatus('success', 'Pipeline completed ✓');
+      this.showToast('Pipeline executed successfully', 'success');
+      this.renderPageContent(this.state.currentPage);
     } catch (err) {
-      notify(`Error: ${err.message}`, 'error');
-      setPipelineChip('error');
-      runBtn.disabled = false;
-      runBtn.querySelector('.btn-label').textContent = 'Run Analysis';
+      this.state.error = err.message;
+      this.updateStatus('error', 'Pipeline failed');
+      this.showToast(err.message, 'error');
+    } finally {
+      this.state.loading = false;
+      this.setButtonLoading(false);
     }
-  });
-
-  // ── Reset graph ────────────────────────────────────────────────────────────
-  $('reset-graph').addEventListener('click', () => { if (cy) cy.fit(); });
-
-  // ── Notification ───────────────────────────────────────────────────────────
-  function notify(msg, type = 'success') {
-    const c = $('notification-container');
-    const n = document.createElement('div');
-    n.className = `notification ${type}`;
-    n.textContent = msg;
-    c.appendChild(n);
-    setTimeout(() => n.remove(), 5000);
   }
 
-  // ── Initial load ───────────────────────────────────────────────────────────
-  fetchAndRender().then(() => {
-    if (state.reportData) {
-      setStep('input', 'done');
-      markAllDone();
-      setPipelineChip('done');
+  getPipelinePayload() {
+    return {
+      repo:             document.getElementById('repo-input').value.trim() || '',
+      pr:               parseInt(document.getElementById('pr-input').value) || 0,
+      base_branch:      document.getElementById('base-input').value.trim() || 'main',
+      diff_text:        this.diffText || '',
+      region:           document.getElementById('region-select').value,
+      carbon_threshold: parseFloat(document.getElementById('carbon-threshold-input').value) || 500,
+    };
+  }
+
+  handleDiffUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      this.diffText = e.target.result;
+      this.showToast(`Diff loaded: ${file.name} (${(file.size/1024).toFixed(1)} KB)`, 'success');
+    };
+    reader.readAsText(file);
+  }
+
+  setButtonLoading(loading) {
+    const btn  = document.getElementById('run-button');
+    const text = btn.querySelector('.btn-text');
+    btn.disabled = loading;
+    text.textContent = loading ? 'Running…' : 'Run Pipeline';
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 1: DASHBOARD
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderDashboard() {
+    const r = this.state.pipelineResult;
+    if (!r) return;
+
+    // FIX: All metric values populated from real data
+    this._setText('dashboard-decision', r.final_decision || '—');
+    this._setText('dashboard-strategy', r.selection_strategy || 'Selection Strategy');
+    this._setText('dashboard-pf',       this.fmtPct(r.probability_of_failure));
+    this._setText('dashboard-carbon',   this.fmtCarbon(r.current_carbon_intensity));
+    this._setText('dashboard-carbon-src', r.carbon_source || 'Current Grid');
+    this._setText('dashboard-saved',    r.tests_saved != null ? `${r.tests_saved} tests` : '—');
+    this._setText('dashboard-runtime',  r.runtime_reduction || '—');
+    this._setText('dashboard-status',   r.status || 'completed');
+
+    // Apply color to decision
+    const decEl = document.getElementById('dashboard-decision');
+    if (decEl) {
+      decEl.className = 'metric-value';
+      if (r.final_decision === 'SMART_SELECTIVE') decEl.classList.add('metric-success');
+      else if (r.final_decision === 'CARBON_DEFERRED') decEl.classList.add('metric-warning');
+      else decEl.classList.add('metric-info');
     }
+
+    // PR banner
+    const prMeta = r.pr_meta || {};
+    const prBanner = document.getElementById('pr-banner');
+    if (prBanner && prMeta.title) {
+      prBanner.style.display = 'block';
+      prBanner.innerHTML = `
+        <strong>PR:</strong> ${this._esc(prMeta.title)} &nbsp;·&nbsp;
+        <strong>State:</strong> ${prMeta.state} &nbsp;·&nbsp;
+        <strong>Author:</strong> ${prMeta.user} &nbsp;·&nbsp;
+        <strong>+${prMeta.additions}/-${prMeta.deletions}</strong> lines
+      `;
+    }
+
+    // AI summary on dashboard
+    const summary = r.overall_summary || (r.explanation && r.explanation.overall_summary);
+    const summaryBox = document.getElementById('llm-summary-box');
+    if (summaryBox && summary) {
+      summaryBox.style.display = 'block';
+      this._setText('llm-overall-summary', summary);
+    }
+
+    this.renderPipelineChart();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 2: DEPENDENCY
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderDependency() {
+    const r = this.state.pipelineResult;
+    if (!r) return;
+
+    const changedList  = r.changed_files_list || Object.keys(r.changed_files || {});
+    const graphStats   = r.module_graph_stats  || {};
+
+    this._setText('dep-files-count',  changedList.length);
+    this._setText('dep-source-count', graphStats.total_source_files ?? '—');
+    this._setText('dep-tests-count',  graphStats.total_test_files   ?? '—');
+    this._setText('dep-edges-count',  graphStats.total_edges        ?? '—');
+
+    // Changed files list
+    const filesEl = document.getElementById('changed-files-list');
+    if (filesEl) {
+      if (changedList.length === 0) {
+        filesEl.innerHTML = '<p class="no-data">No changes detected</p>';
+      } else {
+        filesEl.innerHTML = changedList.map(f => `
+          <div class="list-item">
+            <span class="file-icon">${this._fileIcon(f)}</span>
+            <strong>${this._esc(f)}</strong>
+          </div>`).join('');
+      }
+    }
+
+    // Similarity table with pf scores
+    this.renderSimilarityTable();
+
+    // Real dependency graph
+    this.renderDependencyGraph();
+  }
+
+  renderSimilarityTable() {
+    const r     = this.state.pipelineResult;
+    const tbody = document.getElementById('similarity-tbody');
+    if (!tbody || !r) return;
+    const scores = r.similarity_scores || [];
+    if (scores.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="no-data">No similarity scores available</td></tr>';
+      return;
+    }
+    tbody.innerHTML = scores.map(s => `
+      <tr>
+        <td title="${this._esc(s.module)}">${this._short(s.module, 30)}</td>
+        <td title="${this._esc(s.test)}">${this._short(s.test, 30)}</td>
+        <td>${this.fmtPct(s.score)}</td>
+        <td>${this.fmtPct(s.pf)}</td>
+        <td class="${s.included ? 'badge-run' : 'badge-prune'}">${s.included ? '✓ RUN' : '✗ SKIP'}</td>
+      </tr>`).join('');
+  }
+
+  renderDependencyGraph() {
+    const r         = this.state.pipelineResult;
+    const container = document.getElementById('dependency-graph');
+    if (!container || !r) return;
+
+    const depGraph   = r.dependency_graph || { nodes: [], edges: [] };
+    const nodeList   = depGraph.nodes || [];
+    const edgeList   = depGraph.edges || [];
+    const changed    = new Set(r.changed_files_list || []);
+    const testFiles  = new Set((r.selected_tests || []).concat(r.pruned_tests || []));
+
+    if (nodeList.length === 0) {
+      container.innerHTML = '<p style="padding:20px;text-align:center;color:#a8adb8;">No dependency data available — ensure GITHUB_TOKEN is set</p>';
+      return;
+    }
+
+    // Use vis-network if available
+    if (typeof vis !== 'undefined') {
+      const nodes = new vis.DataSet(nodeList.slice(0, 60).map((node, idx) => {
+        let color = { background: '#2d3142', border: '#4a5568' };
+        if (changed.has(node))   color = { background: '#ef4444', border: '#ff6b6b' };
+        else if (testFiles.has(node)) color = { background: '#10b981', border: '#34d399' };
+        else if (this._isTestPath(node)) color = { background: '#10b981', border: '#34d399' };
+        return { id: idx, label: this._short(node, 20), title: node, color, font: { color: '#e8ecf1' } };
+      }));
+
+      const nodeIndex = {};
+      nodeList.slice(0, 60).forEach((n, i) => { nodeIndex[n] = i; });
+
+      const edges = new vis.DataSet(
+        edgeList
+          .filter(([a, b]) => nodeIndex[a] !== undefined && nodeIndex[b] !== undefined)
+          .slice(0, 150)
+          .map(([a, b], i) => ({
+            id: i,
+            from: nodeIndex[a],
+            to:   nodeIndex[b],
+            arrows: 'to',
+            color: { color: 'rgba(0,217,255,0.25)', highlight: '#00d9ff' },
+          }))
+      );
+
+      if (this.networkInstance) this.networkInstance.destroy();
+      this.networkInstance = new vis.Network(container, { nodes, edges }, {
+        physics: { enabled: true, solver: 'forceAtlas2Based', stabilization: { iterations: 100 } },
+        interaction: { hover: true, zoomView: true },
+        layout: { improvedLayout: true },
+      });
+    } else {
+      // Fallback text display
+      container.innerHTML = `<div style="padding:16px;color:#a8adb8;">
+        <p><strong>${nodeList.length}</strong> nodes, <strong>${edgeList.length}</strong> edges</p>
+        <p style="margin-top:8px;">vis-network not loaded — displaying text summary</p>
+        <ul style="margin-top:8px;font-size:12px;">${nodeList.slice(0,20).map(n=>`<li>${this._esc(n)}</li>`).join('')}</ul>
+      </div>`;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 3: CARBON
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderCarbon() {
+    const r = this.state.pipelineResult;
+    if (!r) return;
+
+    this._setText('carbon-intensity-now',   this.fmtCarbon(r.current_carbon_intensity));
+    this._setText('carbon-source-api',      r.carbon_source || '—');
+    const threshold = r.carbon_threshold || 500;
+    const intensity = r.current_carbon_intensity || 0;
+    const exceeded  = intensity > threshold;
+    this._setText('carbon-threshold-status', exceeded ? '⚠ Exceeded' : '✓ Within Limit');
+    this._setText('carbon-action',           r.carbon_action || 'Proceed');
+
+    // Schedule info
+    const schedEl = document.getElementById('carbon-schedule-info');
+    if (schedEl) {
+      schedEl.innerHTML = `
+        <div class="carbon-info-grid">
+          <div><strong>Zone:</strong> ${r.region || document.getElementById('region-select').value}</div>
+          <div><strong>Intensity:</strong> ${intensity} gCO₂/kWh</div>
+          <div><strong>Threshold:</strong> ${threshold} gCO₂/kWh</div>
+          <div><strong>Action:</strong> ${r.carbon_action}</div>
+          <div><strong>Recommendation:</strong> ${exceeded
+            ? '⚠ Delay non-critical tests to lower carbon window (e.g. off-peak hours)'
+            : '✓ Carbon intensity acceptable — proceed with optimized test selection'}</div>
+        </div>`;
+    }
+
+    const details = {
+      current_intensity: intensity,
+      threshold,
+      carbon_source:       r.carbon_source,
+      action:              r.carbon_action,
+      tests_pruned_for_carbon: r.pruned_count,
+      region:  document.getElementById('region-select').value,
+      timestamp: new Date().toISOString(),
+    };
+    this._setText('carbon-details', JSON.stringify(details, null, 2));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 4: ML
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderML() {
+    const r = this.state.pipelineResult;
+    if (!r) return;
+
+    const pf = r.probability_of_failure || 0;
+    this._setText('ml-pf-score',     this.fmtPct(pf));
+    this._setText('ml-risk-level',   pf > 0.7 ? 'High' : pf > 0.4 ? 'Medium' : 'Low');
+    this._setText('ml-gate-decision', r.gate_decision || r.final_decision || '—');
+    this._setText('ml-confidence',   this.fmtPct(1 - pf));
+
+    // ML features table
+    const tbody = document.getElementById('ml-features-tbody');
+    if (tbody) {
+      const feats = r.ml_features || [];
+      if (feats.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="no-data">No features</td></tr>';
+      } else {
+        tbody.innerHTML = feats.map(f => `
+          <tr>
+            <td>${this._esc(String(f.name))}</td>
+            <td>${this._esc(String(f.value))}</td>
+            <td class="impact-${f.impact || 'low'}">${f.impact || 'low'}</td>
+          </tr>`).join('');
+      }
+    }
+
+    // Explanation JSON
+    const mlExpl = {
+      model:               'XGBoost Probability of Failure (composite)',
+      probability_of_failure: pf,
+      gate_decision:       r.gate_decision,
+      selection_strategy:  r.selection_strategy,
+      features_used:       r.ml_features || [],
+      xgboost_weights: {
+        similarity:      '30%',
+        dependency_path: '25%',
+        hash_changed:    '20%',
+        transitive_depth:'15%',
+        carbon_factor:   '10%',
+      },
+      timestamp: new Date().toISOString(),
+    };
+    this._setText('ml-explanation', JSON.stringify(mlExpl, null, 2));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 5: CI/CD
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderCICD() {
+    const r    = this.state.pipelineResult;
+    if (!r) return;
+    const repo = document.getElementById('repo-input').value || 'local';
+    const pr   = parseInt(document.getElementById('pr-input').value);
+
+    this._setText('cicd-trigger',        pr > 0 ? 'GitHub PR' : 'Local/Diff');
+    this._setText('cicd-repo',           repo);
+    this._setText('cicd-selected-count', r.selected_tests?.length ?? '—');
+    this._setText('cicd-pruned-count',   r.pruned_tests?.length ?? '—');
+
+    // Selected tests with pf badge
+    const selEl = document.getElementById('cicd-selected-tests');
+    if (selEl) {
+      const sel = r.selected_tests || [];
+      selEl.innerHTML = sel.length === 0
+        ? '<p class="no-data">No tests selected</p>'
+        : sel.map(t => {
+            const d = (r.test_details || {})[t] || {};
+            const reason = d.in_dep_path ? '🔗 dep' : d.hash_changed ? '🔥 changed' : `~${(d.similarity||0).toFixed(2)} sim`;
+            return `<div class="test-item run"><span class="test-name">${this._esc(t)}</span><span class="test-badge">${reason}</span></div>`;
+          }).join('');
+    }
+
+    // Pruned tests with reason
+    const prnEl = document.getElementById('cicd-pruned-tests');
+    if (prnEl) {
+      const prn = r.pruned_tests || [];
+      prnEl.innerHTML = prn.length === 0
+        ? '<p class="no-data">No tests pruned</p>'
+        : prn.map(t => {
+            const d = (r.test_details || {})[t] || {};
+            return `<div class="test-item pruned"><span class="test-name">${this._esc(t)}</span><span class="test-badge">pf=${(d.pf||0).toFixed(2)}</span></div>`;
+          }).join('');
+    }
+
+    const testList = (r.selected_tests || []).join(' ');
+    this._setText('cicd-command', testList ? `pytest ${testList}` : 'pytest --collect-only');
+
+    const summary = {
+      total_tests: r.total_tests,
+      selected:    r.selected_tests?.length,
+      pruned:      r.pruned_tests?.length,
+      reduction:   r.runtime_reduction,
+      final_decision: r.final_decision,
+      carbon_intensity: `${r.current_carbon_intensity} gCO₂/kWh`,
+      selection_strategy: r.selection_strategy,
+    };
+    this._setText('cicd-summary', JSON.stringify(summary, null, 2));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 6: LLM EXPLAIN (new)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderExplain() {
+    const r = this.state.pipelineResult;
+    if (!r) return;
+
+    const explanation = r.explanation || {};
+    const summary     = r.overall_summary || explanation.overall_summary || 'No summary available.';
+    const testExpls   = r.test_explanations || explanation.test_explanations || [];
+
+    this._setText('explain-summary', summary);
+
+    const tbody = document.getElementById('explain-tbody');
+    if (tbody) {
+      if (testExpls.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="no-data">No explanations generated</td></tr>';
+      } else {
+        tbody.innerHTML = testExpls.map(e => `
+          <tr>
+            <td title="${this._esc(e.test)}">${this._short(e.test, 35)}</td>
+            <td class="${e.decision === 'RUN' ? 'badge-run' : 'badge-prune'}">${e.decision}</td>
+            <td class="explain-reason">${this._esc(e.reason || '')}</td>
+          </tr>`).join('');
+      }
+    }
+
+    this._setText('explain-raw', JSON.stringify(explanation, null, 2));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CHARTS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  renderPipelineChart() {
+    const r      = this.state.pipelineResult;
+    const canvas = document.getElementById('pipeline-chart');
+    if (!canvas || !r) return;
+
+    const stages = r.stage_timings || {};
+    const labels = Object.keys(stages).map(l => l.replace(/_/g, ' ').toUpperCase());
+    const data   = Object.values(stages);
+
+    if (this.chartInstance) this.chartInstance.destroy();
+
+    this.chartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Stage Duration (ms)',
+          data,
+          backgroundColor: 'rgba(0, 217, 255, 0.65)',
+          borderColor:     '#00d9ff',
+          borderWidth:     2,
+          borderRadius:    4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: true, labels: { color: '#e8ecf1' } } },
+        scales: {
+          y: { beginAtZero: true, ticks: { color: '#a8adb8' }, grid: { color: 'rgba(45,49,66,0.3)' } },
+          x: { ticks: { color: '#a8adb8', maxRotation: 35 }, grid: { color: 'rgba(45,49,66,0.3)' } },
+        },
+      },
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // STATUS & TOAST
+  // ══════════════════════════════════════════════════════════════════════════
+
+  updateStatus(status, text) {
+    const dot    = document.getElementById('status-dot');
+    const label  = document.getElementById('status-text');
+    const loader = document.getElementById('status-loader');
+    dot.className = 'status-dot';
+    if (status === 'loading') { dot.classList.add('loading'); loader.style.display = 'block'; }
+    else if (status === 'error') { dot.classList.add('error'); loader.style.display = 'none'; }
+    else { dot.classList.add('success'); loader.style.display = 'none'; }
+    label.textContent = text;
+  }
+
+  showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className   = `toast ${type}`;
+    toast.classList.remove('hidden');
+    setTimeout(() => toast.classList.add('hidden'), 5000);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // HELPERS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  fmtPct(v) {
+    if (v === null || v === undefined) return '—';
+    // If value is already 0–1 range, multiply; if >1 assume already pct
+    const pct = v <= 1 ? v * 100 : v;
+    return `${pct.toFixed(1)}%`;
+  }
+
+  fmtCarbon(v) {
+    if (v === null || v === undefined) return '—';
+    return `${Number(v).toFixed(0)} gCO₂/kWh`;
+  }
+
+  _setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = (value === null || value === undefined) ? '—' : String(value);
+  }
+
+  _esc(s) {
+    if (!s) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  _short(s, maxLen) {
+    if (!s) return '';
+    if (s.length <= maxLen) return this._esc(s);
+    return this._esc('…' + s.slice(-(maxLen - 1)));
+  }
+
+  _fileIcon(path) {
+    if (path.endsWith('.py'))  return '🐍';
+    if (path.endsWith('.js') || path.endsWith('.ts')) return '📜';
+    if (path.includes('test')) return '🧪';
+    return '📄';
+  }
+
+  _isTestPath(p) {
+    return /test[s_]|_test\.|\.spec\.|\.test\./.test(p.toLowerCase());
+  }
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+let app;
+document.addEventListener('DOMContentLoaded', () => { app = new GreenOpsApp(); });
+
+function copyCommand() {
+  const cmd = document.getElementById('cicd-command').textContent;
+  navigator.clipboard.writeText(cmd).then(() => {
+    if (app) app.showToast('Command copied to clipboard', 'success');
   });
-});
+}

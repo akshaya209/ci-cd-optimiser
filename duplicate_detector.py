@@ -38,7 +38,7 @@ from typing import NamedTuple
 log = logging.getLogger(__name__)
 
 # ── Configurable threshold ─────────────────────────────────────────────────────
-_DEFAULT_THRESHOLD = 0.92
+_DEFAULT_THRESHOLD = 0.75
 INTER_TEST_DUP_THRESHOLD: float = float(
     os.environ.get("INTER_TEST_DUP_THRESHOLD", _DEFAULT_THRESHOLD)
 )

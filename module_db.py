@@ -1,59 +1,29 @@
-"""
-module_db.py
-============
-Green-Ops CI/CD Framework — Module Hash Generator + Registry
-
-Called by github_ci_integration.py as the module_db step.
-Provides the interface expected by load_module_from_path():
-  - generate_hash(ast_result: dict) -> str
-  - store_module(module_info: dict) -> None
-
-Also extends the SQLite store with full PR-level tracking.
-
-CHANGES:
-  - REAL SHA-256 hash from AST content (not demo/random values).
-  - Integrates with module_embedding_store.SQLiteEmbeddingStore.
-  - generate_hash() is deterministic: same content = same hash.
-  - store_module() persists to SQLite with upsert semantics.
-"""
-
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
+import math
+import mysql.connector
 from typing import Optional
 
 log = logging.getLogger("greenops.module_db")
 
-DB_PATH = os.environ.get(
-    "GREENOPS_DB_PATH",
-    "./greenops_output/module_registry.sqlite",
-)
+# DB CONFIG (update this!)
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "password": "your_password",
+    "database": "greenops"
+}
 
 
+# ─────────────────────────────────────────
+# HASH GENERATION 
+# ─────────────────────────────────────────
 def generate_hash(ast_result: dict) -> str:
-    """
-    Generate a stable SHA-256 hash for a module's semantic content.
-
-    The hash is computed from the module's structural fingerprint:
-      - function names + signatures
-      - import list
-      - class names
-    NOT from raw source bytes (so reformatting doesn't change the hash).
-
-    This is what github_ci_integration.run_module_hash_generator() calls.
-
-    Args:
-        ast_result: dict from ast_parser.parse_file().to_dict() or similar
-
-    Returns:
-        hex string SHA-256 hash, or "" on error
-    """
     if not isinstance(ast_result, dict):
         return ""
 
-    # Build a normalised structural fingerprint
     fingerprint = {
         "functions": sorted([
             f.get("name", "") if isinstance(f, dict) else str(f)
@@ -74,44 +44,89 @@ def generate_hash(ast_result: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# ─────────────────────────────────────────
+# DB CONNECTION
+# ─────────────────────────────────────────
+def get_connection():
+    return mysql.connector.connect(**DB_CONFIG)
+
+
+# ─────────────────────────────────────────
+# STORE MODULE 
+# ─────────────────────────────────────────
 def store_module(module_info: dict) -> None:
-    """
-    Persist a module record to the SQLite store.
-    Called by github_ci_integration.run_module_hash_generator().
-
-    Args:
-        module_info: dict with keys: repo, filepath, language, module_hash, ast_result
-    """
     try:
-        from module_embedding_store import SQLiteEmbeddingStore
-        store = SQLiteEmbeddingStore(db_path=DB_PATH)
-        store.upsert(
-            repo         = module_info.get("repo", "unknown"),
-            file_path    = module_info.get("filepath", ""),
-            file_hash    = module_info.get("module_hash", ""),
-            embedding    = None,    # embedding added later by repo_module_extractor
-            language     = module_info.get("language", "python"),
-            ast_features = module_info.get("ast_result") if isinstance(
-                module_info.get("ast_result"), dict
-            ) else None,
-            value_score  = _compute_value_score(module_info.get("ast_result", {})),
-            pr_number    = module_info.get("pr_number", 0),
-        )
-        log.debug("Stored module: %s", module_info.get("filepath"))
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        repo      = module_info.get("repo", "unknown")
+        file_path = module_info.get("filepath", "")
+        language  = module_info.get("language", "python")
+        file_hash = module_info.get("module_hash", "")
+        pr_number = module_info.get("pr_number", 0)
+        ast_result = module_info.get("ast_result", {})
+
+        value_score = _compute_value_score(ast_result)
+        ast_json = json.dumps(ast_result)
+
+        # 1️⃣ Ensure module exists
+        cursor.execute("""
+            SELECT module_id FROM modules
+            WHERE repo=%s AND file_path=%s
+        """, (repo, file_path))
+
+        result = cursor.fetchone()
+
+        if result:
+            module_id = result[0]
+        else:
+            cursor.execute("""
+                INSERT INTO modules (repo, file_path, language)
+                VALUES (%s, %s, %s)
+            """, (repo, file_path, language))
+            module_id = cursor.lastrowid
+
+        # 2️⃣ Insert PR if not exists
+        cursor.execute("""
+            INSERT IGNORE INTO pull_requests (pr_id, repo, author)
+            VALUES (%s, %s, %s)
+        """, (pr_number, repo, "system"))
+
+        # 3️⃣ Upsert module version
+        cursor.execute("""
+            INSERT INTO module_versions (pr_id, module_id, module_hash, value_score)
+            VALUES (%s, %s, %s, %s)
+        """, (pr_number, module_id, file_hash, value_score))
+
+        # 4️⃣ Store AST features
+        cursor.execute("""
+            INSERT INTO ast_features (module_id, pr_id, ast_json)
+            VALUES (%s, %s, %s)
+        """, (module_id, pr_number, ast_json))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        log.info("Stored module: %s", file_path)
+
     except Exception as e:
-        log.warning("store_module failed for %s: %s",
-                    module_info.get("filepath", "?"), e)
+        log.error("store_module failed for %s: %s",
+                  module_info.get("filepath", "?"), e)
 
 
+# ─────────────────────────────────────────
+# VALUE SCORE (UNCHANGED)
+# ─────────────────────────────────────────
 def _compute_value_score(ast_result: dict) -> float:
-    """Simple value score from AST features."""
     if not isinstance(ast_result, dict):
         return 0.0
-    import math
+
     fns     = len(ast_result.get("functions", []))
     methods = len(ast_result.get("methods", []))
     imports = len(ast_result.get("imports", []))
     lines   = ast_result.get("num_lines", 1)
+
     return round(
         0.4 * (fns + methods) +
         0.3 * imports +
@@ -120,22 +135,53 @@ def _compute_value_score(ast_result: dict) -> float:
     )
 
 
+# ─────────────────────────────────────────
+# GET STORED HASH
+# ─────────────────────────────────────────
 def get_stored_hash(repo: str, file_path: str) -> Optional[str]:
-    """Retrieve the stored hash for a module (for comparison in PR diff)."""
     try:
-        from module_embedding_store import SQLiteEmbeddingStore
-        store  = SQLiteEmbeddingStore(db_path=DB_PATH)
-        record = store.get(repo, file_path)
-        return record["file_hash"] if record else None
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT mv.module_hash
+            FROM module_versions mv
+            JOIN modules m ON mv.module_id = m.module_id
+            WHERE m.repo=%s AND m.file_path=%s
+            ORDER BY mv.id DESC
+            LIMIT 1
+        """, (repo, file_path))
+
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        return result[0] if result else None
+
     except Exception:
         return None
 
 
+# ─────────────────────────────────────────
+# LIST MODULES
+# ─────────────────────────────────────────
 def list_stored_modules(repo: str) -> list:
-    """Return all stored modules for a repo."""
     try:
-        from module_embedding_store import SQLiteEmbeddingStore
-        store = SQLiteEmbeddingStore(db_path=DB_PATH)
-        return store.list_all(repo)
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT m.file_path, mv.module_hash, mv.value_score
+            FROM modules m
+            JOIN module_versions mv ON m.module_id = mv.module_id
+            WHERE m.repo=%s
+        """, (repo,))
+
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        return results
+
     except Exception:
         return []

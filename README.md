@@ -201,17 +201,17 @@ All while increasing confidence in every merge.
 ## 🧪 Getting Started
 
 ```bash
-git clone <repo>
+git clone https://github.com/akshaya209/ci-cd-optimiser.git
 cd ci-cd-optimiser
 pip install -r requirements.txt
 ```
 
-Run analysis:
+View dashboard and llm explanations:
 
 ```bash
 python dashboard/server.py
 ```
-
+To integrate it with your codebase add your fine grained github token and action.yml file in your repo
 ---
 
 ## 📜 License

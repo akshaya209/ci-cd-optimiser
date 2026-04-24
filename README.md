@@ -232,6 +232,11 @@ To integrate it with your codebase add your fine grained github token and action
 ## LLM explanation
 <img width="1430" height="723" alt="image" src="https://github.com/user-attachments/assets/e9a724b9-c8c8-4e44-b7a0-ba2d17bfde98" />
 
+---
+## Integration with github actions
+<img width="1455" height="334" alt="image" src="https://github.com/user-attachments/assets/2b3e7d50-ff59-41e4-bf62-38826bf91293" />
+
+
 
 
 

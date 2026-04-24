@@ -206,11 +206,13 @@ cd ci-cd-optimiser
 pip install -r requirements.txt
 ```
 
-View dashboard and llm explanations:
+View dashboard and llm explanations run:
 
 ```bash
 python dashboard/server.py
+http://localhost:8000
 ```
+
 To integrate it with your codebase add your fine grained github token and action.yml file in your repo
 ---
 ## Dashboard

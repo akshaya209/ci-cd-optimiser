@@ -213,6 +213,21 @@ python dashboard/server.py
 ```
 To integrate it with your codebase add your fine grained github token and action.yml file in your repo
 ---
+## Dashboard
+<img width="1470" height="673" alt="image" src="https://github.com/user-attachments/assets/10774ef5-0fda-4b5c-b3be-ed238f224947" />
+## Dependencies
+<img width="1443" height="784" alt="image" src="https://github.com/user-attachments/assets/bc91ba00-649b-41b9-a901-20a6e11a1bd3" />
+## Carbon intensity 
+<img width="1464" height="779" alt="image" src="https://github.com/user-attachments/assets/5264a4d9-779e-4ac3-a8fe-1ca19533568f" />
+## CI/CD
+<img width="1470" height="757" alt="image" src="https://github.com/user-attachments/assets/211ea38d-1ed5-467f-a0cb-c7c9bead80d5" />
+## LLM explanation
+<img width="1430" height="723" alt="image" src="https://github.com/user-attachments/assets/e9a724b9-c8c8-4e44-b7a0-ba2d17bfde98" />
+
+
+
+
+
 
 ## 📜 License
 
